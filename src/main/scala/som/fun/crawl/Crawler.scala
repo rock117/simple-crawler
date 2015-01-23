@@ -32,7 +32,7 @@ object CrawlerTest extends App {
  */
 class Crawler(startPage: String,
   filter: (String => Boolean) = (url: String) => true,
-  onPageLoaded: (String, Int, Array[Byte], Map[String, String]) => Unit = (url: String, status: Int, data: Array[Byte], headers: Map[String, String]) => { println(s"download $url done") }) {
+  onDataLoaded: (String, Int, Array[Byte], Map[String, String]) => Unit = (url: String, status: Int, data: Array[Byte], headers: Map[String, String]) => { println(s"download $url done") }) {
   private val latch = new CountDownLatch(1)
   private val linkRegex = """ (src|href)="([^"]+)"|(src|href)='([^']+)' """.trim.r
   private val crawledPool = new HashSet[String]
@@ -88,7 +88,7 @@ class Crawler(startPage: String,
     conn.disconnect
     val data = out.toByteArray()
     val header = null
-    this.onPageLoaded(url, conn.getResponseCode(), data, header)
+    this.onDataLoaded(url, conn.getResponseCode(), data, header)
     crawledPool.add(url)
     (conn.getResponseCode(), data, conn.getHeaderFields())
 
