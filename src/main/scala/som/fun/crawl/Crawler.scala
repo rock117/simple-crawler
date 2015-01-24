@@ -11,18 +11,15 @@ import java.util.concurrent.CountDownLatch
 import java.util.HashSet
 import java.io.PrintStream
 import java.io.FileOutputStream
+import java.util.regex.Pattern
+import scala.collection.mutable.ArrayBuffer
 
 object CrawlerTest extends App {
-  // System.setOut(new PrintStream(new FileOutputStream("D:/tmp/log.txt"))) 
-//  new Crawler("http://www.some.com/",
-//    filter = (url: String) => {
-//      true
-//    },
-//    onComplete = (url: String, status: Int, data: Array[Byte], headers: Map[String, String]) => {
-//
-//    }).crawl
-//    
-     new Crawler("http://www.163.com").crawl
+
+//  new Crawler("http://www.qq.com", filter = (url: String) => url.contains(".qq.com")).crawl
+  val seq = Seq("a","b")
+  println(seq.mkString(","))
+   println(Seq.empty[String].mkString(",").length())
 }
 
 /**
@@ -32,9 +29,10 @@ object CrawlerTest extends App {
  */
 class Crawler(startPage: String,
   filter: (String => Boolean) = (url: String) => true,
-  onDataLoaded: (String, Int, Array[Byte], Map[String, String]) => Unit = (url: String, status: Int, data: Array[Byte], headers: Map[String, String]) => { println(s"download $url done") }) {
+  onDataLoaded: (String, Int, Array[Byte], Map[String, String]) => Any = (url: String, status: Int, data: Array[Byte], headers: Map[String, String]) => { println(s"download $url done") }) {
   private val latch = new CountDownLatch(1)
   private val linkRegex = """ (src|href)="([^"]+)"|(src|href)='([^']+)' """.trim.r
+  private val htmlTypeRegex = "\btext/html\b"
   private val crawledPool = new HashSet[String]
 
   def crawl {
@@ -48,15 +46,28 @@ class Crawler(startPage: String,
       link =>
         val future = Future(get(link))
         future.onSuccess {
-          case data =>
+          case data if isTextPage(data._3) =>
             crawlPageLinks(link, new String(data._2))
         }
         future.onFailure {
-          case e =>
-            println(e)
+          case e: Exception =>
+            println(s"visit $link error!")
+            e.printStackTrace
         }
     }
   }
+
+  private def getFullUrl(parentUrl: String, link: String) = {
+    val baseHost = getHostBase(parentUrl)
+    link match {
+      case link if link.startsWith("/") => baseHost + link
+      case link if link.startsWith("http:") || link.startsWith("https:") => link
+      case _ =>
+        val index = parentUrl.lastIndexOf("/")
+        parentUrl.substring(0, index) + "/" + link
+    }
+  }
+
   private def parseCrawlLinks(parentUrl: String, html: String) = {
     val baseHost = getHostBase(parentUrl)
     val links = fetchLinks(html).map {
@@ -64,7 +75,9 @@ class Crawler(startPage: String,
         link match {
           case link if link.startsWith("/") => baseHost + link
           case link if link.startsWith("http:") || link.startsWith("https:") => link
-          case _ => baseHost + "/" + link
+          case _ =>
+            val index = parentUrl.lastIndexOf("/")
+            parentUrl.substring(0, index) + "/" + link
         }
     }.filter {
       link => !crawledPool.contains(link) && this.filter(link)
@@ -85,12 +98,17 @@ class Crawler(startPage: String,
       out.write(buf, 0, len)
       len = stream.read(buf)
     }
-    conn.disconnect
+
     val data = out.toByteArray()
-    val header = null
-    this.onDataLoaded(url, conn.getResponseCode(), data, header)
+    val status = conn.getResponseCode()
+
+    val headers = conn.getHeaderFields().toMap.map {
+      head => (head._1, head._2.mkString(","))
+    }
+    conn.disconnect
     crawledPool.add(url)
-    (conn.getResponseCode(), data, conn.getHeaderFields())
+    this.onDataLoaded(url, status, data, headers)
+    (conn.getResponseCode(), data, headers)
 
   }
   private def fetchLinks(html: String) = {
@@ -107,6 +125,17 @@ class Crawler(startPage: String,
     val uri = new URL(url)
     val portPart = if (uri.getPort() == -1 || uri.getPort() == 80) "" else ":" + uri.getPort()
     uri.getProtocol() + "://" + uri.getHost() + portPart
+  }
+
+  private def isTextPage(headers: Map[String, String]) = {
+    val contentType = if (headers contains "Content-Type") headers("Content-Type") else null
+    contentType match {
+      case null => false
+      case contentType if contentType isEmpty => false
+      case contentType if Pattern.compile(htmlTypeRegex).matcher(contentType).find => true
+      case _ => false
+    }
+
   }
 
 } 
